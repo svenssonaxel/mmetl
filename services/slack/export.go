@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -30,21 +29,42 @@ func truncateRunes(s string, i int) string {
 }
 
 func SlackConvertTimeStamp(ts string) int64 {
+	microSeconds := SlackConvertTimeStampToMicroSeconds(ts)
+	if microSeconds == 1 {
+		// Bad timestamp detected
+		return 1
+	}
+	timestamp := microSeconds / 1000
+	if microSeconds%1000 >= 500 {
+		timestamp++
+	}
+	return timestamp
+}
+
+func SlackConvertTimeStampToMicroSeconds(ts string) int64 {
 	timeStrings := strings.Split(ts, ".")
 
-	tail := "0000"
-	if len(timeStrings) > 1 {
-		tail = timeStrings[1][:4]
-	}
-	timeString := timeStrings[0] + tail
-
-	timeStamp, err := strconv.ParseInt(timeString, 10, 64)
+	seconds, err := strconv.ParseInt(timeStrings[0], 10, 64)
 	if err != nil {
 		log.Println("Slack Import: Bad timestamp detected.")
 		return 1
 	}
-
-	return int64(math.Round(float64(timeStamp) / 10)) // round for precision
+	microSeconds := int64(0)
+	if len(timeStrings) > 1 {
+		if len(timeStrings[1]) > 6 {
+			log.Println("Slack Import: Bad timestamp detected.")
+			return 1
+		}
+		for len(timeStrings[1]) < 6 {
+			timeStrings[1] += "0"
+		}
+		microSeconds, err = strconv.ParseInt(timeStrings[1], 10, 64)
+		if err != nil {
+			log.Println("Slack Import: Bad timestamp detected.")
+			return 1
+		}
+	}
+	return seconds*1000000 + microSeconds
 }
 
 func SlackConvertChannelName(channelName string, channelId string) string {

@@ -483,7 +483,9 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 
 		timestamps := make(map[int64]bool)
 		sort.Slice(channelPosts, func(i, j int) bool {
-			return SlackConvertTimeStamp(channelPosts[i].TimeStamp) < SlackConvertTimeStamp(channelPosts[j].TimeStamp)
+			// Converting to milliseconds can create duplicates, so we need to use
+			// microseconds to get a reproducible sort order.
+			return SlackConvertTimeStampToMicroSeconds(channelPosts[i].TimeStamp) < SlackConvertTimeStampToMicroSeconds(channelPosts[j].TimeStamp)
 		})
 		threads := map[string]*IntermediatePost{}
 
