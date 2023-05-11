@@ -33,7 +33,7 @@ func init() {
 	if err := TransformSlackCmd.MarkFlagRequired("team"); err != nil {
 		panic(err)
 	}
-	TransformSlackCmd.Flags().StringP("file", "f", "", "the Slack export file to transform")
+	TransformSlackCmd.Flags().StringArrayP("file", "f", []string{}, "The Slack export file to transform. You can provide this flag multiple times to join multiple exports.")
 	if err := TransformSlackCmd.MarkFlagRequired("file"); err != nil {
 		panic(err)
 	}
@@ -56,7 +56,7 @@ func init() {
 
 func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 	team, _ := cmd.Flags().GetString("team")
-	inputFilePath, _ := cmd.Flags().GetString("file")
+	inputFilePaths, _ := cmd.Flags().GetStringArray("file")
 	outputFilePath, _ := cmd.Flags().GetString("output")
 	attachmentsDir, _ := cmd.Flags().GetString("attachments-dir")
 	skipConvertPosts, _ := cmd.Flags().GetBool("skip-convert-posts")
@@ -87,21 +87,26 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// input file
-	fileReader, err := os.Open(inputFilePath)
-	if err != nil {
-		return err
-	}
-	defer fileReader.Close()
+	// input files
+	zipReaders := make([]*zip.Reader, len(inputFilePaths))
+	for i, inputFilePath := range inputFilePaths {
+		fileReader, err := os.Open(inputFilePath)
+		if err != nil {
+			return err
+		}
+		defer fileReader.Close()
 
-	zipFileInfo, err := fileReader.Stat()
-	if err != nil {
-		return err
-	}
+		zipFileInfo, err := fileReader.Stat()
+		if err != nil {
+			return err
+		}
 
-	zipReader, err := zip.NewReader(fileReader, zipFileInfo.Size())
-	if err != nil || zipReader.File == nil {
-		return err
+		zipReader, err := zip.NewReader(fileReader, zipFileInfo.Size())
+		if err != nil || zipReader.File == nil {
+			return err
+		}
+
+		zipReaders[i] = zipReader
 	}
 
 	logger := log.New()
@@ -110,7 +115,16 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 	}
 	slackTransformer := slack.NewTransformer(team, logger)
 
-	slackExport, err := slackTransformer.ParseSlackExportFile(zipReader, skipConvertPosts)
+	slackExports := make([]*slack.SlackExport, len(zipReaders))
+	for i, zipReader := range zipReaders {
+		slackExport, err := slackTransformer.ParseSlackExportFile(zipReader, skipConvertPosts)
+		if err != nil {
+			return err
+		}
+		slackExports[i] = slackExport
+	}
+
+	slackExport, err := slackTransformer.MergeSlackExports(slackExports)
 	if err != nil {
 		return err
 	}
