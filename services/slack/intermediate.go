@@ -327,8 +327,16 @@ func buildChannelsByOriginalNameMap(intermediate *Intermediate) map[string]*Inte
 
 func getNormalisedFilePath(file *SlackFile, attachmentsDir string) string {
 	n := makeAlphaNum(file.Name, '.', '-', '_')
-	p := path.Join(attachmentsDir, fmt.Sprintf("%s_%s", file.Id, n))
+	p := path.Join(attachmentsDir, file.Id, n)
 	return norm.NFC.String(p)
+}
+
+func createDirectoryForFile(file string) error {
+	dirPath := path.Dir(file)
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return err
+	}
+	return nil
 }
 
 func addFileToPost(file *SlackFile, uploads map[string]*zip.File, post *IntermediatePost, attachmentsDir string, allowDownload bool) error {
@@ -342,10 +350,14 @@ func addFileToPost(file *SlackFile, uploads map[string]*zip.File, post *Intermed
 func addDownloadToPost(file *SlackFile, post *IntermediatePost, attachmentsDir string) error {
 	destFilePath := getNormalisedFilePath(file, attachmentsInternal)
 	fullFilePath := path.Join(attachmentsDir, destFilePath)
+	err := createDirectoryForFile(fullFilePath)
+	if err != nil {
+		return err
+	}
 
 	log.Printf("Downloading %q into %q...\n", file.DownloadURL, destFilePath)
 
-	err := downloadInto(fullFilePath, file.DownloadURL, file.Size)
+	err = downloadInto(fullFilePath, file.DownloadURL, file.Size)
 	if err != nil {
 		return err
 	}
@@ -391,7 +403,12 @@ func addZipFileToPost(file *SlackFile, uploads map[string]*zip.File, post *Inter
 	defer zipFileReader.Close()
 
 	destFilePath := getNormalisedFilePath(file, attachmentsInternal)
-	destFile, err := os.Create(path.Join(attachmentsDir, destFilePath))
+	fullFilePath := path.Join(attachmentsDir, destFilePath)
+	err = createDirectoryForFile(fullFilePath)
+	if err != nil {
+		return err
+	}
+	destFile, err := os.Create(fullFilePath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create file %s in the attachments directory", file.Id)
 	}
