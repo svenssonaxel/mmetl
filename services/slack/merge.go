@@ -3,6 +3,7 @@ package slack
 import (
 	"archive/zip"
 	"encoding/binary"
+	"encoding/json"
 	"reflect"
 	"sort"
 
@@ -225,10 +226,52 @@ func mergePostSlice(a, b []SlackPost) ([]SlackPost, error) {
 	return mergeSlicesWith(a, b, func(x SlackPost) string { return x.TimeStamp }, mergePost)
 }
 func mergePost(a SlackPost, b SlackPost) (SlackPost, error) {
-	if reflect.DeepEqual(a, b) {
-		return a, nil
+	// Check that the posts are equal except for the Original field.
+	aCopy, bCopy := a, b
+	aCopy.Original = ""
+	bCopy.Original = ""
+	if !reflect.DeepEqual(aCopy, bCopy) {
+		return SlackPost{}, errors.Errorf("cannot merge unequal posts: %v and %v", a, b)
 	}
-	return SlackPost{}, errors.Errorf("cannot merge unequal posts: %v and %v", a, b)
+	// Check that the Original fields are equivalent, meaning equal except for
+	// the last_read, subscribed, and blocks[].block_id fields.
+	originalsAreEquivalent, err := postOriginalEquivalent(a.Original, b.Original)
+	if err != nil {
+		return SlackPost{}, err
+	}
+	if !originalsAreEquivalent {
+		return SlackPost{}, errors.Errorf("cannot merge posts with original JSON that differs in other ways than last_read, subscribed, and blocks[].block_id: %s and %s", a.Original, b.Original)
+	}
+	return a, nil
+}
+func postOriginalEquivalent(a, b string) (bool, error) {
+	var m1, m2 map[string]interface{}
+	if err := json.Unmarshal([]byte(a), &m1); err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal([]byte(b), &m2); err != nil {
+		return false, err
+	}
+	for _, m := range []map[string]interface{}{m1, m2} {
+		delete(m, "last_read")
+		delete(m, "subscribed")
+		if blocks, ok := m["blocks"].([]interface{}); ok {
+			for _, block := range blocks {
+				if blockMap, ok := block.(map[string]interface{}); ok {
+					delete(blockMap, "block_id")
+				}
+			}
+		}
+	}
+	modifiedJSON1, err := json.Marshal(m1)
+	if err != nil {
+		return false, err
+	}
+	modifiedJSON2, err := json.Marshal(m2)
+	if err != nil {
+		return false, err
+	}
+	return string(modifiedJSON1) == string(modifiedJSON2), nil
 }
 
 // mergeUploads merges two maps of zip.File representing uploads.

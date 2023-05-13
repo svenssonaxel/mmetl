@@ -439,7 +439,7 @@ func (t *Transformer) CreateIntermediateUser(userID string) {
 	t.Logger.Warnf("Created a new user because the original user was missing from the import files. user=%s", userID)
 }
 
-func (t *Transformer) CreateAndAddPostToThreads(post SlackPost, threads map[string]*IntermediatePost, timestamps map[int64]bool, channel *IntermediateChannel) {
+func (t *Transformer) CreateAndAddPostToThreads(post SlackPost, threads map[string]*IntermediatePost, timestamps map[int64]bool, channel *IntermediateChannel, discardInvalidProps, addOriginal bool) {
 	author := t.Intermediate.UsersById[post.User]
 	if author == nil {
 		t.CreateIntermediateUser(post.User)
@@ -451,6 +451,18 @@ func (t *Transformer) CreateAndAddPostToThreads(post SlackPost, threads map[stri
 		Channel:  channel.Name,
 		Message:  post.Text,
 		CreateAt: SlackConvertTimeStamp(post.TimeStamp),
+	}
+
+	props, propsB := t.GetPropsForPost(&post, false, addOriginal)
+	if utf8.RuneCount(propsB) <= model.PostPropsMaxRunes {
+		newPost.Props = props
+	} else {
+		if discardInvalidProps {
+			t.Logger.Warn("Unable to import the post as props exceed the maximum character count. Skipping as --discard-invalid-props is enabled.")
+			return
+		} else {
+			t.Logger.Warn("Unable to add the props to post as they exceed the maximum character count.")
+		}
 	}
 
 	AddPostToThreads(post, newPost, threads, channel, timestamps)
@@ -477,13 +489,22 @@ func (t *Transformer) AddFilesToPost(post *SlackPost, skipAttachments bool, slac
 	}
 }
 
-func (t *Transformer) AddAttachmentsToPost(post *SlackPost, newPost *IntermediatePost) (model.StringInterface, []byte) {
-	props := model.StringInterface{"attachments": post.Attachments}
+func (t *Transformer) GetPropsForPost(post *SlackPost, addAttachments, addOriginal bool) (model.StringInterface, []byte) {
+	props := model.StringInterface{}
+	if addAttachments {
+		props["attachments"] = post.Attachments
+	}
+	if addOriginal {
+		props["slackOriginal"] = post.Original
+	}
+	if len(props) == 0 {
+		return nil, nil
+	}
 	propsByteArray, _ := json.Marshal(props)
 	return props, propsByteArray
 }
 
-func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir string, skipAttachments, discardInvalidProps, allowDownload bool) error {
+func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir string, skipAttachments, discardInvalidProps, allowDownload, addOriginal bool) error {
 	t.Logger.Info("Transforming posts")
 
 	newGroupChannels := []*IntermediateChannel{}
@@ -527,17 +548,15 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 				}
 				t.AddFilesToPost(&post, skipAttachments, slackExport, attachmentsDir, newPost, allowDownload)
 
-				if len(post.Attachments) > 0 {
-					props, propsB := t.AddAttachmentsToPost(&post, newPost)
-					if utf8.RuneCount(propsB) <= model.PostPropsMaxRunes {
-						newPost.Props = props
+				props, propsB := t.GetPropsForPost(&post, len(post.Attachments) > 0, addOriginal)
+				if utf8.RuneCount(propsB) <= model.PostPropsMaxRunes {
+					newPost.Props = props
+				} else {
+					if discardInvalidProps {
+						t.Logger.Warn("Unable import post as props exceed the maximum character count. Skipping as --discard-invalid-props is enabled.")
+						continue
 					} else {
-						if discardInvalidProps {
-							t.Logger.Warn("Unable import post as props exceed the maximum character count. Skipping as --discard-invalid-props is enabled.")
-							continue
-						} else {
-							t.Logger.Warn("Unable to add props to post as they exceed the maximum character count.")
-						}
+						t.Logger.Warn("Unable to add props to post as they exceed the maximum character count.")
 					}
 				}
 
@@ -563,6 +582,18 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					Channel:  channel.Name,
 					Message:  post.Comment.Comment,
 					CreateAt: SlackConvertTimeStamp(post.TimeStamp),
+				}
+
+				props, propsB := t.GetPropsForPost(&post, false, addOriginal)
+				if utf8.RuneCount(propsB) <= model.PostPropsMaxRunes {
+					newPost.Props = props
+				} else {
+					if discardInvalidProps {
+						t.Logger.Warn("Unable to import the post as props exceed the maximum character count. Skipping as --discard-invalid-props is enabled.")
+						continue
+					} else {
+						t.Logger.Warn("Unable to add the props to post as they exceed the maximum character count.")
+					}
 				}
 
 				AddPostToThreads(post, newPost, threads, channel, timestamps)
@@ -592,17 +623,15 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 
 				t.AddFilesToPost(&post, skipAttachments, slackExport, attachmentsDir, newPost, allowDownload)
 
-				if len(post.Attachments) > 0 {
-					props, propsB := t.AddAttachmentsToPost(&post, newPost)
-					if utf8.RuneCount(propsB) <= model.PostPropsMaxRunes {
-						newPost.Props = props
+				props, propsB := t.GetPropsForPost(&post, len(post.Attachments) > 0, addOriginal)
+				if utf8.RuneCount(propsB) <= model.PostPropsMaxRunes {
+					newPost.Props = props
+				} else {
+					if discardInvalidProps {
+						t.Logger.Warn("Unable to import the post as props exceed the maximum character count. Skipping as --discard-invalid-props is enabled.")
+						continue
 					} else {
-						if discardInvalidProps {
-							t.Logger.Warn("Unable to import the post as props exceed the maximum character count. Skipping as --discard-invalid-props is enabled.")
-							continue
-						} else {
-							t.Logger.Warn("Unable to add the props to post as they exceed the maximum character count.")
-						}
+						t.Logger.Warn("Unable to add the props to post as they exceed the maximum character count.")
 					}
 				}
 
@@ -615,7 +644,7 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					continue
 				}
 
-				t.CreateAndAddPostToThreads(post, threads, timestamps, channel)
+				t.CreateAndAddPostToThreads(post, threads, timestamps, channel, discardInvalidProps, addOriginal)
 
 			// me message
 			case post.IsMeMessage():
@@ -623,7 +652,7 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					t.Logger.Warn("Unable to import the message as the user field is missing.")
 					continue
 				}
-				t.CreateAndAddPostToThreads(post, threads, timestamps, channel)
+				t.CreateAndAddPostToThreads(post, threads, timestamps, channel, discardInvalidProps, addOriginal)
 
 			// change topic message
 			case post.IsChannelTopicMessage():
@@ -631,7 +660,7 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					t.Logger.Warn("Unable to import the message as the user field is missing.")
 					continue
 				}
-				t.CreateAndAddPostToThreads(post, threads, timestamps, channel)
+				t.CreateAndAddPostToThreads(post, threads, timestamps, channel, discardInvalidProps, addOriginal)
 
 			// change channel purpose message
 			case post.IsChannelPurposeMessage():
@@ -639,7 +668,7 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					t.Logger.Warn("Unable to import the message as the user field is missing.")
 					continue
 				}
-				t.CreateAndAddPostToThreads(post, threads, timestamps, channel)
+				t.CreateAndAddPostToThreads(post, threads, timestamps, channel, discardInvalidProps, addOriginal)
 
 			// change channel name message
 			case post.IsChannelNameMessage():
@@ -647,7 +676,7 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					t.Logger.Warn("Slack Import: Unable to import the message as the user field is missing.")
 					continue
 				}
-				t.CreateAndAddPostToThreads(post, threads, timestamps, channel)
+				t.CreateAndAddPostToThreads(post, threads, timestamps, channel, discardInvalidProps, addOriginal)
 
 			default:
 				t.Logger.Warnf("Unable to import the message as its type is not supported. post_type=%s, post_subtype=%s", post.Type, post.SubType)
@@ -668,7 +697,7 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 	return nil
 }
 
-func (t *Transformer) Transform(slackExport *SlackExport, attachmentsDir string, skipAttachments, discardInvalidProps, allowDownload bool) error {
+func (t *Transformer) Transform(slackExport *SlackExport, attachmentsDir string, skipAttachments, discardInvalidProps, allowDownload, addOriginal bool) error {
 	t.TransformUsers(slackExport.Users)
 
 	if err := t.TransformAllChannels(slackExport); err != nil {
@@ -678,7 +707,7 @@ func (t *Transformer) Transform(slackExport *SlackExport, attachmentsDir string,
 	t.PopulateUserMemberships()
 	t.PopulateChannelMemberships()
 
-	if err := t.TransformPosts(slackExport, attachmentsDir, skipAttachments, discardInvalidProps, allowDownload); err != nil {
+	if err := t.TransformPosts(slackExport, attachmentsDir, skipAttachments, discardInvalidProps, allowDownload, addOriginal); err != nil {
 		return err
 	}
 

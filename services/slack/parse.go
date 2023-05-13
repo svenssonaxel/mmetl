@@ -50,6 +50,7 @@ type SlackFile struct {
 }
 
 type SlackPost struct {
+	Original    string                   `json:"-"` // To hold the unparsed JSON post
 	User        string                   `json:"user"`
 	BotId       string                   `json:"bot_id"`
 	BotUsername string                   `json:"username"`
@@ -144,10 +145,18 @@ func SlackParseChannels(data io.Reader, channelType model.ChannelType) ([]SlackC
 func SlackParsePosts(data io.Reader) ([]SlackPost, error) {
 	decoder := json.NewDecoder(data)
 
-	var posts []SlackPost
-	if err := decoder.Decode(&posts); err != nil {
-		log.Println("Slack Import: Error occurred when parsing some Slack posts. Import may work anyway.")
-		return posts, err
+	var rawPosts []json.RawMessage
+	if err := decoder.Decode(&rawPosts); err != nil {
+		log.Println("Slack Import: Error occurred when parsing Slack posts. Import will not work.")
+		return nil, err
+	}
+	posts := make([]SlackPost, len(rawPosts))
+	for i, rawPost := range rawPosts {
+		err := json.Unmarshal(rawPost, &posts[i])
+		if err != nil {
+			log.Println("Slack Import: Error occurred when parsing a Slack post. Import may work anyway.")
+		}
+		posts[i].Original = string(rawPost)
 	}
 	return posts, nil
 }

@@ -42,6 +42,7 @@ func init() {
 	TransformSlackCmd.Flags().BoolP("skip-convert-posts", "c", false, "Skips converting mentions and post markup. Only for testing purposes")
 	TransformSlackCmd.Flags().BoolP("skip-attachments", "a", false, "Skips copying the attachments from the import file")
 	TransformSlackCmd.Flags().BoolP("allow-download", "l", false, "Allows downloading the attachments for the import file")
+	TransformSlackCmd.Flags().BoolP("add-json-original", "j", false, "Add the raw JSON of the Slack exported post as a prop")
 	TransformSlackCmd.Flags().BoolP("discard-invalid-props", "p", false, "Skips converting posts with invalid props instead discarding the props themselves")
 	TransformSlackCmd.Flags().Bool("debug", true, "Whether to show debug logs or not")
 
@@ -62,6 +63,7 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 	skipConvertPosts, _ := cmd.Flags().GetBool("skip-convert-posts")
 	skipAttachments, _ := cmd.Flags().GetBool("skip-attachments")
 	allowDownload, _ := cmd.Flags().GetBool("allow-download")
+	addOriginal, _ := cmd.Flags().GetBool("add-json-original")
 	discardInvalidProps, _ := cmd.Flags().GetBool("discard-invalid-props")
 	debug, _ := cmd.Flags().GetBool("debug")
 
@@ -129,7 +131,7 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	err = slackTransformer.Transform(slackExport, attachmentsDir, skipAttachments, discardInvalidProps, allowDownload)
+	err = slackTransformer.Transform(slackExport, attachmentsDir, skipAttachments, discardInvalidProps, allowDownload, addOriginal)
 	if err != nil {
 		return err
 	}
