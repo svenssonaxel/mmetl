@@ -749,5 +749,11 @@ func makeAlphaNum(str string, allowAdditional ...rune) string {
 }
 
 var specialReplacements = map[string]string{
+	"Å": "Aa",
+	"Ä": "Ae",
+	"Ö": "Oe",
+	"å": "aa",
+	"ä": "ae",
+	"ö": "oe",
 	"ß": "ss",
 }
