@@ -105,13 +105,14 @@ type IntermediatePost struct {
 }
 
 type Intermediate struct {
-	PublicChannels  []*IntermediateChannel       `json:"public_channels"`
-	PrivateChannels []*IntermediateChannel       `json:"private_channels"`
-	GroupChannels   []*IntermediateChannel       `json:"group_channels"`
-	DirectChannels  []*IntermediateChannel       `json:"direct_channels"`
-	UsersById       map[string]*IntermediateUser `json:"users"`
-	Posts           []*IntermediatePost          `json:"posts"`
-	UserOverrides   map[string]*IntermediateUser `json:"user_overrides"`
+	PublicChannels   []*IntermediateChannel          `json:"public_channels"`
+	PrivateChannels  []*IntermediateChannel          `json:"private_channels"`
+	GroupChannels    []*IntermediateChannel          `json:"group_channels"`
+	DirectChannels   []*IntermediateChannel          `json:"direct_channels"`
+	UsersById        map[string]*IntermediateUser    `json:"users"`
+	Posts            []*IntermediatePost             `json:"posts"`
+	UserOverrides    map[string]*IntermediateUser    `json:"user_overrides"`
+	ChannelOverrides map[string]*IntermediateChannel `json:"channel_overrides"`
 }
 
 func (t *Transformer) ParseUserOverrides(userOverridesFile *os.File) error {
@@ -251,6 +252,96 @@ func getOriginalName(channel SlackChannel) string {
 	}
 }
 
+func (t *Transformer) ParseChannelOverrides(channelOverridesFile *os.File) error {
+	t.Intermediate.ChannelOverrides = map[string]*IntermediateChannel{}
+	if channelOverridesFile == nil {
+		return nil
+	}
+	t.Logger.Info("Parsing channel overrides")
+	reader := csv.NewReader(channelOverridesFile)
+	headers, err := reader.Read()
+	if err != nil {
+		t.Logger.Error(err.Error())
+		return err
+	}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Logger.Error(err.Error())
+			return err
+		}
+		key := ""
+		overrideChannel := &IntermediateChannel{}
+		for i, field := range record {
+			switch headers[i] {
+			case "apply_to_channelname":
+				key = field
+			case "name":
+				overrideChannel.Name = field
+			case "display_name":
+				overrideChannel.DisplayName = field
+			case "purpose":
+				overrideChannel.Purpose = field
+			case "header":
+				overrideChannel.Header = field
+			case "topic":
+				overrideChannel.Topic = field
+			default:
+				t.Logger.Warnf("Unknown field %s in channel override record", headers[i])
+			}
+		}
+		if key == "" {
+			return errors.New("channel override record does not have an apply_to_channelname value")
+		}
+		t.Intermediate.ChannelOverrides[key] = overrideChannel
+	}
+	t.Logger.Infof("Parsed %d channel overrides", len(t.Intermediate.ChannelOverrides))
+	return nil
+}
+
+func (t *Transformer) ApplyChannelOverrides(channel *IntermediateChannel) {
+	if len(t.Intermediate.ChannelOverrides) == 0 {
+		return
+	}
+	if overrideChannel, ok := t.Intermediate.ChannelOverrides[channel.Name]; ok {
+		if overrideChannel.Name != "" {
+			channel.Name = overrideChannel.Name
+			if channel.Name == "-" {
+				channel.Name = ""
+			}
+		}
+		if overrideChannel.DisplayName != "" {
+			channel.DisplayName = overrideChannel.DisplayName
+			if channel.DisplayName == "-" {
+				channel.DisplayName = ""
+			}
+		}
+		if overrideChannel.Purpose != "" {
+			channel.Purpose = overrideChannel.Purpose
+			if channel.Purpose == "-" {
+				channel.Purpose = ""
+			}
+		}
+		if overrideChannel.Header != "" {
+			channel.Header = overrideChannel.Header
+			if channel.Header == "-" {
+				channel.Header = ""
+			}
+		}
+		if overrideChannel.Topic != "" {
+			channel.Topic = overrideChannel.Topic
+			if channel.Topic == "-" {
+				channel.Topic = ""
+			}
+		}
+	} else {
+		t.Logger.Warnf("No channel override found for channel %s", channel.Name)
+	}
+}
+
 func (t *Transformer) TransformChannels(channels []SlackChannel) []*IntermediateChannel {
 	resultChannels := []*IntermediateChannel{}
 	for _, channel := range channels {
@@ -274,6 +365,10 @@ func (t *Transformer) TransformChannels(channels []SlackChannel) []*Intermediate
 			Purpose:      channel.Purpose.Value,
 			Header:       channel.Topic.Value,
 			Type:         channel.Type,
+		}
+
+		if newChannel.Type == model.ChannelTypeOpen || newChannel.Type == model.ChannelTypePrivate {
+			t.ApplyChannelOverrides(newChannel)
 		}
 
 		newChannel.Sanitise(t.Logger)
