@@ -2,6 +2,7 @@ package slack
 
 import (
 	"archive/zip"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -110,6 +111,96 @@ type Intermediate struct {
 	DirectChannels  []*IntermediateChannel       `json:"direct_channels"`
 	UsersById       map[string]*IntermediateUser `json:"users"`
 	Posts           []*IntermediatePost          `json:"posts"`
+	UserOverrides   map[string]*IntermediateUser `json:"user_overrides"`
+}
+
+func (t *Transformer) ParseUserOverrides(userOverridesFile *os.File) error {
+	t.Intermediate.UserOverrides = map[string]*IntermediateUser{}
+	if userOverridesFile == nil {
+		return nil
+	}
+	t.Logger.Info("Parsing user overrides")
+	reader := csv.NewReader(userOverridesFile)
+	headers, err := reader.Read()
+	if err != nil {
+		t.Logger.Error(err.Error())
+		return err
+	}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Logger.Error(err.Error())
+			return err
+		}
+		key := ""
+		overrideUser := &IntermediateUser{}
+		for i, field := range record {
+			switch headers[i] {
+			case "apply_to_username":
+				key = field
+			case "username":
+				overrideUser.Username = field
+			case "first_name":
+				overrideUser.FirstName = field
+			case "last_name":
+				overrideUser.LastName = field
+			case "position":
+				overrideUser.Position = field
+			case "email":
+				overrideUser.Email = field
+			case "password":
+				overrideUser.Password = field
+			default:
+				t.Logger.Warnf("Unknown field %s in user override record", headers[i])
+			}
+		}
+		if key == "" {
+			return errors.New("user override record does not have an apply_to_username value")
+		}
+		t.Intermediate.UserOverrides[key] = overrideUser
+	}
+	t.Logger.Infof("Parsed %d user overrides", len(t.Intermediate.UserOverrides))
+	return nil
+}
+
+func (t *Transformer) ApplyUserOverrides(user *IntermediateUser) {
+	if len(t.Intermediate.UserOverrides) == 0 {
+		return
+	}
+	if overrideUser, ok := t.Intermediate.UserOverrides[user.Username]; ok {
+		if overrideUser.Username != "" {
+			user.Username = overrideUser.Username
+		}
+		if overrideUser.FirstName != "" {
+			user.FirstName = overrideUser.FirstName
+			if user.FirstName == "-" {
+				user.FirstName = ""
+			}
+		}
+		if overrideUser.LastName != "" {
+			user.LastName = overrideUser.LastName
+			if user.LastName == "-" {
+				user.LastName = ""
+			}
+		}
+		if overrideUser.Position != "" {
+			user.Position = overrideUser.Position
+			if user.Position == "-" {
+				user.Position = ""
+			}
+		}
+		if overrideUser.Email != "" {
+			user.Email = overrideUser.Email
+		}
+		if overrideUser.Password != "" {
+			user.Password = overrideUser.Password
+		}
+	} else {
+		t.Logger.Warnf("No user override found for user %s", user.Username)
+	}
 }
 
 func (t *Transformer) TransformUsers(users []SlackUser) {
@@ -130,6 +221,8 @@ func (t *Transformer) TransformUsers(users []SlackUser) {
 		if user.IsBot {
 			newUser.Id = user.Profile.BotID
 		}
+
+		t.ApplyUserOverrides(newUser)
 
 		newUser.Sanitise(t.Logger)
 		resultUsers[newUser.Id] = newUser
@@ -435,6 +528,7 @@ func (t *Transformer) CreateIntermediateUser(userID string) {
 		Email:     fmt.Sprintf("%s@local", userID),
 		Password:  model.NewId(),
 	}
+	t.ApplyUserOverrides(newUser)
 	t.Intermediate.UsersById[userID] = newUser
 	t.Logger.Warnf("Created a new user because the original user was missing from the import files. user=%s", userID)
 }

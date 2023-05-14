@@ -39,6 +39,7 @@ func init() {
 	}
 	TransformSlackCmd.Flags().StringP("output", "o", "bulk-export.jsonl", "the output path")
 	TransformSlackCmd.Flags().StringP("attachments-dir", "d", "data", "the path for the attachments directory")
+	TransformSlackCmd.Flags().StringP("useroverrides", "", "", "the name of a csv file used to change the MM user profiles extracted from the Slack export. The `apply_to_username` column is required. Optional columns are `username`, `first_name`, `last_name`, `position`, `email` and `password`. An empty field means no override. A single dash in the `first_name`, `last_name` or `position` field means to override with an empty string.")
 	TransformSlackCmd.Flags().BoolP("skip-convert-posts", "c", false, "Skips converting mentions and post markup. Only for testing purposes")
 	TransformSlackCmd.Flags().BoolP("skip-attachments", "a", false, "Skips copying the attachments from the import file")
 	TransformSlackCmd.Flags().BoolP("allow-download", "l", false, "Allows downloading the attachments for the import file")
@@ -60,6 +61,7 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 	inputFilePaths, _ := cmd.Flags().GetStringArray("file")
 	outputFilePath, _ := cmd.Flags().GetString("output")
 	attachmentsDir, _ := cmd.Flags().GetString("attachments-dir")
+	userOverridesFilename, _ := cmd.Flags().GetString("useroverrides")
 	skipConvertPosts, _ := cmd.Flags().GetBool("skip-convert-posts")
 	skipAttachments, _ := cmd.Flags().GetBool("skip-attachments")
 	allowDownload, _ := cmd.Flags().GetBool("allow-download")
@@ -111,6 +113,17 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 		zipReaders[i] = zipReader
 	}
 
+	// user overrides
+	var userOverridesFile *os.File
+	if userOverridesFilename != "" {
+		var err error
+		userOverridesFile, err = os.Open(userOverridesFilename)
+		if err != nil {
+			return err
+		}
+		defer userOverridesFile.Close()
+	}
+
 	logger := log.New()
 	if debug {
 		logger.Level = log.DebugLevel
@@ -127,6 +140,11 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 	}
 
 	slackExport, err := slackTransformer.MergeSlackExports(slackExports)
+	if err != nil {
+		return err
+	}
+
+	err = slackTransformer.ParseUserOverrides(userOverridesFile)
 	if err != nil {
 		return err
 	}
