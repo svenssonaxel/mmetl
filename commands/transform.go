@@ -46,6 +46,7 @@ func init() {
 	TransformSlackCmd.Flags().BoolP("allow-download", "l", false, "Allows downloading the attachments for the import file")
 	TransformSlackCmd.Flags().BoolP("add-json-original", "j", false, "Add the raw JSON of the Slack exported post as a prop")
 	TransformSlackCmd.Flags().BoolP("discard-invalid-props", "p", false, "Skips converting posts with invalid props instead discarding the props themselves")
+	TransformSlackCmd.Flags().BoolP("team-internal-only", "i", false, "Transform direct and group message channels into private channels. This can be useful when transforming several Slack workspaces into Mattermost teams on a single Mattermost server, since direct and group messages from different Slack workspaces could otherwise be mixed into the same server-wide channel.")
 	TransformSlackCmd.Flags().Bool("debug", true, "Whether to show debug logs or not")
 
 	TransformCmd.AddCommand(
@@ -69,6 +70,7 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 	allowDownload, _ := cmd.Flags().GetBool("allow-download")
 	addOriginal, _ := cmd.Flags().GetBool("add-json-original")
 	discardInvalidProps, _ := cmd.Flags().GetBool("discard-invalid-props")
+	teamInternalOnly, _ := cmd.Flags().GetBool("team-internal-only")
 	debug, _ := cmd.Flags().GetBool("debug")
 
 	// output file
@@ -167,7 +169,7 @@ func transformSlackCmdF(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	err = slackTransformer.Transform(slackExport, attachmentsDir, skipAttachments, discardInvalidProps, allowDownload, addOriginal)
+	err = slackTransformer.Transform(slackExport, attachmentsDir, skipAttachments, discardInvalidProps, allowDownload, addOriginal, teamInternalOnly)
 	if err != nil {
 		return err
 	}

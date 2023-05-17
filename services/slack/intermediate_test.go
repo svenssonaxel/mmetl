@@ -118,7 +118,7 @@ func TestTransformPublicChannels(t *testing.T) {
 		},
 	}
 
-	result := slackTransformer.TransformChannels(publicChannels)
+	result := slackTransformer.TransformChannels(publicChannels, false)
 	require.Len(t, result, len(publicChannels))
 
 	for i := range result {
@@ -177,7 +177,7 @@ func TestTransformPublicChannelsWithAnInvalidMember(t *testing.T) {
 		},
 	}
 
-	result := slackTransformer.TransformChannels(publicChannels)
+	result := slackTransformer.TransformChannels(publicChannels, false)
 	require.Len(t, result, len(publicChannels))
 
 	for i := range result {
@@ -236,7 +236,7 @@ func TestTransformPrivateChannels(t *testing.T) {
 		},
 	}
 
-	result := slackTransformer.TransformChannels(privateChannels)
+	result := slackTransformer.TransformChannels(privateChannels, false)
 	require.Len(t, result, len(privateChannels))
 
 	for i := range result {
@@ -294,7 +294,7 @@ func TestTransformBigGroupChannels(t *testing.T) {
 		},
 	}
 
-	result := slackTransformer.TransformChannels(bigGroupChannels)
+	result := slackTransformer.TransformChannels(bigGroupChannels, false)
 	require.Len(t, result, len(bigGroupChannels))
 
 	for i := range result {
@@ -352,7 +352,7 @@ func TestTransformRegularGroupChannels(t *testing.T) {
 		},
 	}
 
-	result := slackTransformer.TransformChannels(regularGroupChannels)
+	result := slackTransformer.TransformChannels(regularGroupChannels, false)
 	require.Len(t, result, len(regularGroupChannels))
 
 	for i := range result {
@@ -390,7 +390,7 @@ func TestTransformDirectChannels(t *testing.T) {
 		},
 	}
 
-	result := slackTransformer.TransformChannels(directChannels)
+	result := slackTransformer.TransformChannels(directChannels, false)
 	require.Len(t, result, len(directChannels))
 
 	for i := range result {
@@ -413,7 +413,7 @@ func TestTransformChannelWithOneValidMember(t *testing.T) {
 			},
 		}
 
-		result := slackTransformer.TransformChannels(directChannels)
+		result := slackTransformer.TransformChannels(directChannels, false)
 		require.Len(t, result, 0)
 	})
 
@@ -433,7 +433,7 @@ func TestTransformChannelWithOneValidMember(t *testing.T) {
 			},
 		}
 
-		result := slackTransformer.TransformChannels(groupChannels)
+		result := slackTransformer.TransformChannels(groupChannels, false)
 		require.Len(t, result, 0)
 	})
 }

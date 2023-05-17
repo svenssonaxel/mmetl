@@ -67,18 +67,6 @@ func SlackConvertTimeStampToMicroSeconds(ts string) int64 {
 	return seconds*1000000 + microSeconds
 }
 
-func SlackConvertChannelName(channelName string, channelId string) string {
-	newName := strings.Trim(channelName, "_-")
-	if len(newName) == 1 {
-		return "slack-channel-" + newName
-	}
-
-	if isValidChannelNameCharacters(newName) {
-		return newName
-	}
-	return strings.ToLower(channelId)
-}
-
 func SplitChannelsByMemberSize(channels []SlackChannel, limit int) (regularChannels, bigChannels []SlackChannel) {
 	for _, channel := range channels {
 		if len(channel.Members) == 1 {

@@ -342,7 +342,7 @@ func (t *Transformer) ApplyChannelOverrides(channel *IntermediateChannel) {
 	}
 }
 
-func (t *Transformer) TransformChannels(channels []SlackChannel) []*IntermediateChannel {
+func (t *Transformer) TransformChannels(channels []SlackChannel, teamInternalOnly bool) []*IntermediateChannel {
 	resultChannels := []*IntermediateChannel{}
 	for _, channel := range channels {
 		validMembers := filterValidMembers(channel.Members, t.Intermediate.UsersById)
@@ -356,7 +356,31 @@ func (t *Transformer) TransformChannels(channels []SlackChannel) []*Intermediate
 			channel.Type = model.ChannelTypePrivate
 		}
 
-		name := SlackConvertChannelName(channel.Name, channel.Id)
+		name := strings.Trim(channel.Name, "_-")
+
+		if teamInternalOnly && (channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup) {
+			name = strings.ToLower(channel.Id) + "-"
+			if channel.Type == model.ChannelTypeDirect {
+				name += "direct-"
+			} else {
+				name += "group-"
+			}
+			validMemberNames := make([]string, len(validMembers))
+			for i, member := range validMembers {
+				validMemberNames[i] = t.Intermediate.UsersById[member].Username
+			}
+			sort.Strings(validMemberNames)
+			name += strings.Join(validMemberNames, "-")
+		}
+
+		if len(name) == 1 {
+			name = "slack-channel-" + name
+		}
+
+		if !isValidChannelNameCharacters(name) {
+			name = strings.ToLower(channel.Id)
+		}
+
 		newChannel := &IntermediateChannel{
 			OriginalName: getOriginalName(channel),
 			Name:         name,
@@ -365,6 +389,10 @@ func (t *Transformer) TransformChannels(channels []SlackChannel) []*Intermediate
 			Purpose:      channel.Purpose.Value,
 			Header:       channel.Topic.Value,
 			Type:         channel.Type,
+		}
+
+		if teamInternalOnly && (newChannel.Type == model.ChannelTypeDirect || newChannel.Type == model.ChannelTypeGroup) {
+			newChannel.Type = model.ChannelTypePrivate
 		}
 
 		if newChannel.Type == model.ChannelTypeOpen || newChannel.Type == model.ChannelTypePrivate {
@@ -428,24 +456,32 @@ func (t *Transformer) PopulateChannelMemberships() {
 	}
 }
 
-func (t *Transformer) TransformAllChannels(slackExport *SlackExport) error {
+func (t *Transformer) TransformAllChannels(slackExport *SlackExport, teamInternalOnly bool) error {
 	t.Logger.Info("Transforming channels")
 
 	// transform public
-	t.Intermediate.PublicChannels = t.TransformChannels(slackExport.PublicChannels)
+	t.Intermediate.PublicChannels = t.TransformChannels(slackExport.PublicChannels, teamInternalOnly)
 
 	// transform private
-	t.Intermediate.PrivateChannels = t.TransformChannels(slackExport.PrivateChannels)
+	t.Intermediate.PrivateChannels = t.TransformChannels(slackExport.PrivateChannels, teamInternalOnly)
 
 	// transform group
 	regularGroupChannels, bigGroupChannels := SplitChannelsByMemberSize(slackExport.GroupChannels, model.ChannelGroupMaxUsers)
 
-	t.Intermediate.PrivateChannels = append(t.Intermediate.PrivateChannels, t.TransformChannels(bigGroupChannels)...)
+	t.Intermediate.PrivateChannels = append(t.Intermediate.PrivateChannels, t.TransformChannels(bigGroupChannels, teamInternalOnly)...)
 
-	t.Intermediate.GroupChannels = t.TransformChannels(regularGroupChannels)
+	if teamInternalOnly {
+		t.Intermediate.PrivateChannels = append(t.Intermediate.PrivateChannels, t.TransformChannels(regularGroupChannels, teamInternalOnly)...)
+	} else {
+		t.Intermediate.GroupChannels = t.TransformChannels(regularGroupChannels, teamInternalOnly)
+	}
 
 	// transform direct
-	t.Intermediate.DirectChannels = t.TransformChannels(slackExport.DirectChannels)
+	if teamInternalOnly {
+		t.Intermediate.PrivateChannels = append(t.Intermediate.PrivateChannels, t.TransformChannels(slackExport.DirectChannels, teamInternalOnly)...)
+	} else {
+		t.Intermediate.DirectChannels = t.TransformChannels(slackExport.DirectChannels, teamInternalOnly)
+	}
 
 	return nil
 }
@@ -886,10 +922,10 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 	return nil
 }
 
-func (t *Transformer) Transform(slackExport *SlackExport, attachmentsDir string, skipAttachments, discardInvalidProps, allowDownload, addOriginal bool) error {
+func (t *Transformer) Transform(slackExport *SlackExport, attachmentsDir string, skipAttachments, discardInvalidProps, allowDownload, addOriginal, teamInternalOnly bool) error {
 	t.TransformUsers(slackExport.Users)
 
-	if err := t.TransformAllChannels(slackExport); err != nil {
+	if err := t.TransformAllChannels(slackExport, teamInternalOnly); err != nil {
 		return err
 	}
 
