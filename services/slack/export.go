@@ -288,7 +288,22 @@ func (t *Transformer) ExportDirectChannels(channels []*IntermediateChannel, writ
 }
 
 func (t *Transformer) ExportUsers(writer io.Writer) error {
+	users := []*IntermediateUser{}
 	for _, user := range t.Intermediate.UsersById {
+		users = append(users, user)
+	}
+	mergedUsers, err := mergeSlicesWith(users, []*IntermediateUser{},
+		func(x *IntermediateUser) string {
+			return x.Username
+		},
+		func(a, b *IntermediateUser) (*IntermediateUser, error) {
+			t.Logger.Warnf("Merging users with id %s and %s because they share the username %s", a.Id, b.Id, a.Username)
+			return mergeIntermediateUsers(a, b)
+		})
+	if err != nil {
+		return err
+	}
+	for _, user := range mergedUsers {
 		line := GetImportLineFromUser(user, t.TeamName)
 		if err := ExportWriteLine(writer, line); err != nil {
 			return err
@@ -296,6 +311,37 @@ func (t *Transformer) ExportUsers(writer io.Writer) error {
 	}
 
 	return nil
+}
+
+func mergeIntermediateUsers(a, b *IntermediateUser) (*IntermediateUser, error) {
+	newUser := *a
+	if a.Id != b.Id {
+		newUser.Id = ""
+	}
+	if a.Username != b.Username {
+		return nil, errors.Errorf("cannot merge users with different usernames: %s and %s", a.Username, b.Username)
+	}
+	if a.FirstName != b.FirstName {
+		return nil, errors.Errorf("cannot merge users with different first names: %s and %s", a.FirstName, b.FirstName)
+	}
+	if a.LastName != b.LastName {
+		return nil, errors.Errorf("cannot merge users with different last names: %s and %s", a.LastName, b.LastName)
+	}
+	if a.Position != b.Position {
+		return nil, errors.Errorf("cannot merge users with different positions: %s and %s", a.Position, b.Position)
+	}
+	if a.Email != b.Email {
+		return nil, errors.Errorf("cannot merge users with different emails: %s and %s", a.Email, b.Email)
+	}
+	if a.Password == "" {
+		newUser.Password = b.Password
+	}
+	mergedMemberships, err := mergeSlicesWith(a.Memberships, b.Memberships, func(x string) string { return x }, func(x, y string) (string, error) { return x, nil })
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot merge memberships")
+	}
+	newUser.Memberships = mergedMemberships
+	return &newUser, nil
 }
 
 func (t *Transformer) ExportPosts(writer io.Writer) error {
