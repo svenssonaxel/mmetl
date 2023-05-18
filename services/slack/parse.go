@@ -79,7 +79,7 @@ func (p *SlackPost) IsBotMessage() bool {
 }
 
 func (p *SlackPost) IsJoinLeaveMessage() bool {
-	return p.Type == "message" && (p.SubType == "channel_join" || p.SubType == "channel_leave")
+	return p.Type == "message" && (p.SubType == "channel_join" || p.SubType == "channel_leave" || p.SubType == "group_join" || p.SubType == "group_leave" || p.SubType == "joiner_notification" || p.SubType == "joiner_notification_for_inviter")
 }
 
 func (p *SlackPost) IsMeMessage() bool {
@@ -87,11 +87,11 @@ func (p *SlackPost) IsMeMessage() bool {
 }
 
 func (p *SlackPost) IsChannelTopicMessage() bool {
-	return p.Type == "message" && p.SubType == "channel_topic"
+	return p.Type == "message" && (p.SubType == "channel_topic" || p.SubType == "group_topic")
 }
 
 func (p *SlackPost) IsChannelPurposeMessage() bool {
-	return p.Type == "message" && p.SubType == "channel_purpose"
+	return p.Type == "message" && (p.SubType == "channel_purpose" || p.SubType == "group_purpose")
 }
 
 func (p *SlackPost) IsChannelNameMessage() bool {
