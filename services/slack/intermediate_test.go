@@ -58,17 +58,18 @@ func TestIntermediateChannelSanitise(t *testing.T) {
 		assert.Equal(t, "slack-channel-b", channel.DisplayName)
 	})
 
-	t.Run("Name and DisplayName should contain valid characters or return id", func(t *testing.T) {
+	t.Run("Name should contain valid characters or return id but display name can be anything", func(t *testing.T) {
+		displayName := "Døsp1Ay_ #$|~ Ņåmë 名字"
 		channel := IntermediateChannel{
 			Id:          "channelId1",
-			Name:        "_-_chännel--name-_-__",
-			DisplayName: "-døsplay_name--",
+			Name:        "_-_chAnnel--name-_-__",
+			DisplayName: displayName,
 		}
 
 		channel.Sanitise(log.New())
 
 		assert.Equal(t, "channelid1", channel.Name)
-		assert.Equal(t, "channelid1", channel.DisplayName)
+		assert.Equal(t, displayName, channel.DisplayName)
 	})
 }
 

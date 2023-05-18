@@ -18,7 +18,7 @@ const (
 	POST_MAX_ATTACHMENTS = 5
 )
 
-var isValidChannelNameCharacters = regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`).MatchString
+var isValidChannelNameCharacters = regexp.MustCompile(`^[a-z0-9\-_]+$`).MatchString
 
 func truncateRunes(s string, i int) string {
 	runes := []rune(s)
