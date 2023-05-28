@@ -233,14 +233,14 @@ func mergePost(a SlackPost, b SlackPost) (SlackPost, error) {
 	if !reflect.DeepEqual(aCopy, bCopy) {
 		return SlackPost{}, errors.Errorf("cannot merge unequal posts: %v and %v", a, b)
 	}
-	// Check that the Original fields are equivalent, meaning equal except for
-	// the last_read, subscribed, and blocks[].block_id fields.
+	// Check that the Original fields are equivalent, meaning equal except for the
+	// last_read, subscribed, blocks[].block_id and files[].is_starred fields.
 	originalsAreEquivalent, err := postOriginalEquivalent(a.Original, b.Original)
 	if err != nil {
 		return SlackPost{}, err
 	}
 	if !originalsAreEquivalent {
-		return SlackPost{}, errors.Errorf("cannot merge posts with original JSON that differs in other ways than last_read, subscribed, and blocks[].block_id: %s and %s", a.Original, b.Original)
+		return SlackPost{}, errors.Errorf("cannot merge posts with original JSON that differs in other ways than last_read, subscribed, blocks[].block_id and files[].is_starred: %s and %s", a.Original, b.Original)
 	}
 	return a, nil
 }
@@ -259,6 +259,13 @@ func postOriginalEquivalent(a, b string) (bool, error) {
 			for _, block := range blocks {
 				if blockMap, ok := block.(map[string]interface{}); ok {
 					delete(blockMap, "block_id")
+				}
+			}
+		}
+		if files, ok := m["files"].([]interface{}); ok {
+			for _, file := range files {
+				if fileMap, ok := file.(map[string]interface{}); ok {
+					delete(fileMap, "is_starred")
 				}
 			}
 		}
