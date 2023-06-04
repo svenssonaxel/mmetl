@@ -14,13 +14,14 @@ import (
 )
 
 type SlackChannel struct {
-	Id      string          `json:"id"`
-	Name    string          `json:"name"`
-	Creator string          `json:"creator"`
-	Members []string        `json:"members"`
-	Purpose SlackChannelSub `json:"purpose"`
-	Topic   SlackChannelSub `json:"topic"`
-	Type    model.ChannelType
+	Id        string          `json:"id"`
+	Name      string          `json:"name"`
+	Creator   string          `json:"creator"`
+	Members   []string        `json:"members"`
+	Purpose   SlackChannelSub `json:"purpose"`
+	Topic     SlackChannelSub `json:"topic"`
+	IsPrivate bool            `json:"is_private"`
+	Type      model.ChannelType
 }
 
 type SlackChannelSub struct {
@@ -136,7 +137,11 @@ func SlackParseChannels(data io.Reader, channelType model.ChannelType) ([]SlackC
 	}
 
 	for i := range channels {
-		channels[i].Type = channelType
+		if channelType == model.ChannelTypeOpen && channels[i].IsPrivate {
+			channels[i].Type = model.ChannelTypePrivate
+		} else {
+			channels[i].Type = channelType
+		}
 	}
 
 	return channels, nil
