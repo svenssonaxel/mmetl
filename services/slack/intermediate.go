@@ -2,6 +2,9 @@ package slack
 
 import (
 	"archive/zip"
+	"bytes"
+	"compress/zlib"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -910,6 +913,67 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 			channelPosts = append(channelPosts, post)
 		}
 		resultPosts = append(resultPosts, channelPosts...)
+	}
+
+	if addOriginal {
+		// Iterate over resultPosts, check if there are any replies and if so, add them to a new prop called "slackOriginalReplies"
+		for _, post := range resultPosts {
+			if len(post.Replies) > 0 {
+				slackOriginalReplies := make(map[string]string)
+				// Populate slackOriginalReplies
+				for _, reply := range post.Replies {
+					slackOriginal := reply.Props["slackOriginal"]
+					slackOriginalString, ok := slackOriginal.(string)
+					key := fmt.Sprintf("%d", reply.CreateAt)
+					if !ok {
+						t.Logger.Warnf("Unable to completely compile slackOriginalReplies since the slackOriginal prop for one of the replies is not a string. reply.CreateAt=%s", key)
+						continue
+					}
+					slackOriginalReplies[key] = slackOriginalString
+				}
+				// Compress and base64 encode slackOriginalReplies
+				slackOriginalRepliesB, sormErr := json.Marshal(slackOriginalReplies)
+				if sormErr != nil {
+					t.Logger.Warnf("Unable to marshal slackOriginalReplies. sormErr=%s", sormErr.Error())
+					continue
+				}
+				slackOriginalRepliesBCompressed := bytes.NewBuffer(nil)
+				// Use zlib compression with highest compression level
+				w, wErr := zlib.NewWriterLevel(slackOriginalRepliesBCompressed, zlib.BestCompression)
+				if wErr != nil {
+					t.Logger.Warnf("Unable to compress slackOriginalReplies. wErr=%s", wErr.Error())
+					continue
+				}
+				_, wrErr := w.Write(slackOriginalRepliesB)
+				if wrErr != nil {
+					t.Logger.Warnf("Unable to compress slackOriginalReplies. wrErr=%s", wrErr.Error())
+					continue
+				}
+				w.Close()
+				slackOriginalRepliesBCompressedBase64 := base64.StdEncoding.EncodeToString(slackOriginalRepliesBCompressed.Bytes())
+				// Clone props and add reply originals
+				props := model.StringInterface{}
+				for k, v := range post.Props {
+					props[k] = v
+				}
+				props["slackOriginalRepliesCompressedBase64"] = slackOriginalRepliesBCompressedBase64
+				// Check if props exceeds the maximum character count
+				propsB, _ := json.Marshal(props)
+				if utf8.RuneCount(propsB) <= model.PostPropsMaxRunes {
+					if utf8.RuneCount(propsB) > model.PostPropsMaxRunes/20 {
+						t.Logger.Warnf("Props exceeds 5%% of the maximum character count. Rune count=%d, Maximum rune count=%d", utf8.RuneCount(propsB), model.PostPropsMaxRunes)
+					}
+					post.Props = props
+				} else {
+					if discardInvalidProps {
+						t.Logger.Warn("Unable to import the post as props exceed the maximum character count. Skipping as --discard-invalid-props is enabled.")
+						continue
+					} else {
+						t.Logger.Warn("Unable to add the props to post as they exceed the maximum character count.")
+					}
+				}
+			}
+		}
 	}
 
 	t.Intermediate.Posts = resultPosts
