@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/zlib"
+	_ "embed"
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mattermost/mattermost-server/v6/app/imports"
 	"github.com/mattermost/mattermost-server/v6/model"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -92,16 +94,16 @@ func (u *IntermediateUser) Sanitise(logger log.FieldLogger) {
 }
 
 type IntermediatePost struct {
-	User     string                `json:"user"`
-	Channel  string                `json:"channel"`
-	Message  string                `json:"message"`
-	Props    model.StringInterface `json:"props"`
-	CreateAt int64                 `json:"create_at"`
-	// Type           string              `json:"type"`
-	Attachments    []string            `json:"attachments"`
-	Replies        []*IntermediatePost `json:"replies"`
-	IsDirect       bool                `json:"is_direct"`
-	ChannelMembers []string            `json:"channel_members"`
+	User           string                        `json:"user"`
+	Channel        string                        `json:"channel"`
+	Message        string                        `json:"message"`
+	Props          model.StringInterface         `json:"props"`
+	CreateAt       int64                         `json:"create_at"`
+	Attachments    []string                      `json:"attachments"`
+	Replies        []*IntermediatePost           `json:"replies"`
+	IsDirect       bool                          `json:"is_direct"`
+	ChannelMembers []string                      `json:"channel_members"`
+	Reactions      *[]imports.ReactionImportData `json:"reactions"`
 }
 
 type Intermediate struct {
@@ -664,6 +666,80 @@ func (t *Transformer) CreateIntermediateUser(userID string) {
 	t.Logger.Warnf("Created a new user because the original user was missing from the import files. user=%s", userID)
 }
 
+func (t *Transformer) SlackConvertReactions(slackReactions *[]SlackReaction, postCreateAt int64) *[]imports.ReactionImportData {
+	if slackReactions == nil {
+		return nil
+	}
+	ret := make([]imports.ReactionImportData, 0, len(*slackReactions))
+	for _, slackReaction := range *slackReactions {
+		if slackReaction.Count != len(slackReaction.Users) {
+			t.Logger.Warnf("Reaction count does not match the number of users. reaction=%s count=%d users=%d", slackReaction.Name, slackReaction.Count, len(slackReaction.Users))
+		}
+		emojiName := t.SlackConvertEmojiName(slackReaction.Name)
+		for _, userId := range slackReaction.Users {
+			user := t.Intermediate.UsersById[userId]
+			if user == nil {
+				t.CreateIntermediateUser(userId)
+				user = t.Intermediate.UsersById[userId]
+			}
+			// We have no idea when the reaction was created but MM requires that the
+			// reaction has a value for CreateAt and that it's greater than the post's
+			// CreateAt. So we just add 1 to the post's CreateAt.
+			reactionCreateAt := postCreateAt + 1
+			ret = append(ret, imports.ReactionImportData{
+				User:      &user.Username,
+				CreateAt:  &reactionCreateAt,
+				EmojiName: &emojiName,
+			})
+		}
+	}
+	return &ret
+}
+
+func (t *Transformer) SlackConvertEmojiName(slackEmojiName string) string {
+	ret := slackEmojiName
+	// Take care of skin tones
+	for _, skinTone := range []struct {
+		slack string
+		mm    string
+	}{
+		{slack: "::skin-tone-2", mm: "_light_skin_tone"},
+		{slack: "::skin-tone-3", mm: "_medium_light_skin_tone"},
+		{slack: "::skin-tone-4", mm: "_medium_skin_tone"},
+		{slack: "::skin-tone-5", mm: "_medium_dark_skin_tone"},
+		{slack: "::skin-tone-6", mm: "_dark_skin_tone"},
+	} {
+		if strings.HasSuffix(ret, skinTone.slack) {
+			return t.SlackConvertEmojiName(strings.TrimSuffix(ret, skinTone.slack)) + skinTone.mm
+		}
+	}
+	// Warn about unsupported compound emoji
+	if strings.Contains(ret, ":") {
+		t.Logger.Warnf("Unsupported compound emoji. emoji=%s", ret)
+		// Replace ":" with "_"
+		ret = strings.Replace(ret, ":", "_", -1)
+	}
+	// Warn about unsupported emoji
+	if _, ok := supportedEmojis[ret]; !ok {
+		t.Logger.Warnf("Unsupported emoji. emoji=%s", ret)
+	}
+	// Return the emoji name if it is found
+	return ret
+}
+
+//go:embed supported_emojis.txt
+var supportedEmojisString string
+var supportedEmojis = (func() map[string]bool {
+	ret := make(map[string]bool)
+	// iterate over the lines in the file
+	for _, emoji := range strings.Split(supportedEmojisString, "\n") {
+		if emoji != "" {
+			ret[emoji] = true
+		}
+	}
+	return ret
+})()
+
 func (t *Transformer) CreateAndAddPostToThreads(post SlackPost, threads map[string]*IntermediatePost, timestamps map[int64]bool, channel *IntermediateChannel, discardInvalidProps, addOriginal bool) {
 	author := t.Intermediate.UsersById[post.User]
 	if author == nil {
@@ -671,11 +747,13 @@ func (t *Transformer) CreateAndAddPostToThreads(post SlackPost, threads map[stri
 		author = t.Intermediate.UsersById[post.User]
 	}
 
+	createAt := SlackConvertTimeStamp(post.TimeStamp)
 	newPost := &IntermediatePost{
-		User:     author.Username,
-		Channel:  channel.Name,
-		Message:  post.Text,
-		CreateAt: SlackConvertTimeStamp(post.TimeStamp),
+		User:      author.Username,
+		Channel:   channel.Name,
+		Message:   post.Text,
+		CreateAt:  createAt,
+		Reactions: t.SlackConvertReactions(post.Reactions, createAt),
 	}
 
 	props, propsB := t.GetPropsForPost(&post, false, addOriginal)
@@ -765,11 +843,13 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					t.CreateIntermediateUser(post.User)
 					author = t.Intermediate.UsersById[post.User]
 				}
+				createAt := SlackConvertTimeStamp(post.TimeStamp)
 				newPost := &IntermediatePost{
-					User:     author.Username,
-					Channel:  channel.Name,
-					Message:  post.Text,
-					CreateAt: SlackConvertTimeStamp(post.TimeStamp),
+					User:      author.Username,
+					Channel:   channel.Name,
+					Message:   post.Text,
+					CreateAt:  createAt,
+					Reactions: t.SlackConvertReactions(post.Reactions, createAt),
 				}
 				t.AddFilesToPost(&post, skipAttachments, slackExport, attachmentsDir, newPost, allowDownload)
 
@@ -802,11 +882,13 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					t.CreateIntermediateUser(post.User)
 					author = t.Intermediate.UsersById[post.User]
 				}
+				createAt := SlackConvertTimeStamp(post.TimeStamp)
 				newPost := &IntermediatePost{
-					User:     author.Username,
-					Channel:  channel.Name,
-					Message:  post.Comment.Comment,
-					CreateAt: SlackConvertTimeStamp(post.TimeStamp),
+					User:      author.Username,
+					Channel:   channel.Name,
+					Message:   post.Comment.Comment,
+					CreateAt:  createAt,
+					Reactions: t.SlackConvertReactions(post.Reactions, createAt),
 				}
 
 				props, propsB := t.GetPropsForPost(&post, false, addOriginal)
@@ -839,11 +921,13 @@ func (t *Transformer) TransformPosts(slackExport *SlackExport, attachmentsDir st
 					author = t.Intermediate.UsersById[post.BotId]
 				}
 
+				createAt := SlackConvertTimeStamp(post.TimeStamp)
 				newPost := &IntermediatePost{
-					User:     author.Username,
-					Channel:  channel.Name,
-					Message:  post.Text,
-					CreateAt: SlackConvertTimeStamp(post.TimeStamp),
+					User:      author.Username,
+					Channel:   channel.Name,
+					Message:   post.Text,
+					CreateAt:  createAt,
+					Reactions: t.SlackConvertReactions(post.Reactions, createAt),
 				}
 
 				t.AddFilesToPost(&post, skipAttachments, slackExport, attachmentsDir, newPost, allowDownload)

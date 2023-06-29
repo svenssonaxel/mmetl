@@ -50,6 +50,12 @@ type SlackFile struct {
 	DownloadURL string `json:"url_private_download"`
 }
 
+type SlackReaction struct {
+	Name  string   `json:"name"`
+	Count int      `json:"count"`
+	Users []string `json:"users"`
+}
+
 type SlackPost struct {
 	Original    string                   `json:"-"` // To hold the unparsed JSON post
 	User        string                   `json:"user"`
@@ -65,6 +71,7 @@ type SlackPost struct {
 	File        *SlackFile               `json:"file"`
 	Files       []*SlackFile             `json:"files"`
 	Attachments []*model.SlackAttachment `json:"attachments"`
+	Reactions   *[]SlackReaction         `json:"reactions"`
 }
 
 func (p *SlackPost) IsPlainMessage() bool {
